@@ -101,7 +101,72 @@ Trước khi thêm, tôi kiểm tra cả 23 câu hỏi: các từ khoá mới ch
 
 ## 4. Observability stack (production)
 
-> _Đang chạy thí nghiệm — điền sau._
+Stack: `docker compose -p k5-day14-observability up -d --build` (agent + nginx + prometheus + grafana + jaeger + locust). Unit test alert rules: `promtool test rules /p/alert_rules_test.yml` → `SUCCESS`.
+
+**Lỗi của lab khi bật stack:** container agent crash liên tục (`ModuleNotFoundError: No module named 'uvicorn'`). `production/Dockerfile` copy package vào `/home/agent/.local` nhưng user `agent` có home là `/app` (`useradd -d /app`), nên Python tìm package ở `/app/.local`. Sửa bằng 1 dòng `ENV PYTHONUSERBASE=/home/agent/.local` (giống Dockerfile của Part 5).
+
+### 4.1 Screenshot
+
+Chụp bằng Chromium headless trỏ thẳng vào UI của stack đang chạy (thư mục `screenshots/`):
+
+- [x] Dashboard Grafana khi đang có tải — `grafana-dashboard.png` (lượt scale_3: 60.8 req/s, error 0.96 %, p95 366.67 ms, 3 instance up)
+- [x] Một trace chậm trong Jaeger — `jaeger-slow-trace.png`
+- [x] Một trace lỗi trong Jaeger — `jaeger-error-trace.png` (thấy span lỗi và HTTP 503; nội dung event `exception` nằm trong panel phải bấm mở trên UI, nên ghi lại ở mục 4.3 từ API Jaeger)
+- [x] Trang Alerts của Prometheus có alert đang **firing** — `prometheus-alert-firing.png`: `AgentHighErrorRate` và `AgentInstanceDown` **cùng firing** (nhóm `agent-slo`: FIRING (2))
+- Thêm: `grafana-during-AD.png` (trong lúc thí nghiệm A + D), `grafana-during-C.png` (thí nghiệm C)
+
+**Câu hỏi Exercise 7.4** (đọc khi chạy tải Locust):
+1. **p95 và avg:** lượt scale_3 (Locust) p95 = 470 ms, avg = 260 ms, p50 = 200 ms. Khoảng cách p95/avg ≈ 1,8 lần cho thấy phân bố có **đuôi dài**: phần lớn request ~200 ms, một nhóm nhỏ (3 % request chậm của mock, +1,5 s) kéo p95/p99 lên trong khi avg vẫn thấp.
+2. **Nginx có chia đều không:** có. `X-Served-By` xoay vòng `.8 → .9 → .4 → .8 → …`; khi chạy scale_3, CPU mỗi instance 0.12 / 0.12 / 0.13 core và panel "Requests/s theo instance" có 3 đường gần trùng nhau (~20 req/s mỗi instance).
+3. **Vì sao input tokens/s > output tokens/s:** baseline đo được input 1146 tokens/s, output 609 tokens/s. Prompt gồm system prompt + tài liệu retrieve được + câu hỏi, còn câu trả lời của mock chỉ là nội dung tài liệu → input dài hơn output. Bản v1 (không retrieval) giảm input còn 676 tokens/s.
+4. **`curl http://localhost:8080/metrics`** → `404`. `nginx.conf` có `location = /metrics { return 404; }`: metric lộ thông tin nội bộ (route, lưu lượng, version) nên không public ra ngoài; Prometheus scrape thẳng từng agent `agent:8000/metrics` trong mạng Docker nội bộ, không đi qua Nginx.
+
+### 4.2 Thí nghiệm "phá hệ thống"
+
+Locust 30 users chạy suốt, 2 agent. Thời gian đo bằng script đọc `GET /api/v1/alerts` mỗi 2 s, tính từ lúc ghi `.env` mới và `docker compose up -d` (T0):
+
+| # | Thay đổi | Alert nào firing | Thời gian từ lúc đổi → firing | Panel nào phản ánh rõ nhất |
+|---|---|---|---|---|
+| A | `MOCK_ERROR_RATE=0.2` (error rate đo được 21.2 %) | `AgentHighErrorRate` | pending 29 s → **firing 90 s** (`for: 1m`) | Error rate (đỏ), Requests/s theo status code (503 tăng), LLM calls error |
+| B | `MOCK_SLOW_RATE=0.3` (p95 = 1.91 s, avg = 0.61 s) | `AgentHighLatencyP95` | pending 35 s → **firing 154 s** (`for: 2m`) | Latency p95 và biểu đồ p50/p95/p99/avg (p95 ×3 avg) |
+| C | `LLM_MODEL=mock-llm-large` (cost $1.25 → $9.46/giờ) | `LLMCostBurnRateHigh` | pending 37 s → **firing 252 s** (`rate[5m]` + `for: 2m`) | Cost burn rate (USD/giờ), LLM cost (1h), LLM latency p95 (p95 HTTP lên 1.64 s) |
+| D | `docker pause` agent-1 (trong lúc A vẫn bật) | `AgentInstanceDown` | pending 13 s → **firing 44 s** (`for: 30s`); `up{job="agent"}` = 0 và 1 | Instances up (giảm còn 1) |
+| E | `AGENT_VERSION=v1` | **Không có** (theo dõi 180 s) | — | Tokens/s giảm (input 1146 → 676/s, output 609 → 366/s), Retrieval hit ratio mất dữ liệu (v1 không retrieve), bảng "Phiên bản đang chạy" |
+
+Quan sát thêm:
+- **Mỗi lần đổi cấu hình**, container agent được tạo lại → `AgentInstanceDown` lên `pending` 10–15 s rồi tự hết. Nhờ `for: 30s` nên không firing nhầm — ví dụ thực tế cho việc vì sao alert cần `for`.
+- **`LLMCostBurnRateHigh` đã firing ngay từ benchmark scaling (100 users, model nhỏ, ~60 req/s ≈ $2.7/giờ)**, trước khi đổi gì. Alert cost theo $/giờ tuyệt đối phản ánh cả traffic tăng, không chỉ việc đổi sang model đắt. Phải đợi nó hết (về $1.25/giờ với 30 users) mới đo được thí nghiệm C.
+- Thí nghiệm C: cost/giờ tăng ×7,5 chứ không ×16 như giá token, vì model lớn chậm hơn 2,5 lần nên với tải vòng kín (Locust) số request/giây giảm, và `rate[5m]` lúc đo còn lẫn dữ liệu trước khi đổi.
+
+**Thí nghiệm E không làm alert nào firing. Phát hiện loại sự cố này trong production bằng cách nào?**
+Đổi về v1 làm accuracy rơi từ 100 % xuống 4,3 % (mục 3) nhưng latency, error rate, instance đều xanh — metric hạ tầng không đo **độ đúng**. Cần:
+- **Quality gate trước deploy:** job CI chạy `run_eval.py` (exit 1 → chặn merge) — đã chạy thử: v1 so với baseline bị chặn với 22 câu regression.
+- **Eval định kỳ trên production:** chạy golden dataset (hoặc LLM-as-judge trên mẫu traffic thật) theo lịch, đẩy accuracy thành metric và alert khi giảm.
+- **Metric chất lượng gián tiếp:** alert khi retrieval hit ratio giảm đột ngột, hoặc khi tokens/câu giảm bất thường; theo dõi feedback người dùng (👍/👎).
+- **Đối chiếu version:** bảng `agent_info` cho thấy version đang chạy — deploy nhầm version là thấy ngay nếu có alert khi version ≠ version mong đợi.
+
+### 4.3 Debug bằng trace
+
+Lấy từ API Jaeger v2 (`/api/v3/traces`, 1000 trace `POST /ask` gần nhất trong 15 phút, lượt scale_3):
+
+- `trace_id`: `f999deace79bb9a0100476750bc647e1`
+- Tổng thời gian: **1725.8 ms**
+- Span chiếm nhiều thời gian nhất: `chat mock-llm-small` (**1693.8 ms, 98.1 %**) — `agent.retrieve_context` chỉ 24.7 ms (1.4 %). Request chậm vì **LLM upstream** (thuộc nhóm 3 % request chậm của mock), không phải do code agent hay retrieval.
+- Dòng log tương ứng (`docker compose -p k5-day14-observability logs agent | grep f999deace79bb9a0100476750bc647e1`):
+
+```json
+{"ts": "2026-11-25T09:46:28.749406+00:00", "level": "INFO", "service": "observable-agent", "instance": "3167aff10dd7", "event": "llm_call", "trace_id": "f999deace79bb9a0100476750bc647e1", "span_id": "bcbf7f81d0a03a76", "request_id": "214216f0cdb2", "model": "mock-llm-small", "agent_version": "v2", "input_tokens": 83, "output_tokens": 44, "cost_usd": 3.9e-05, "llm_ms": 1693.0}
+{"ts": "2026-11-25T09:46:28.750574+00:00", "level": "INFO", "service": "observable-agent", "instance": "3167aff10dd7", "event": "http_request", "trace_id": "f999deace79bb9a0100476750bc647e1", "span_id": "bcbf7f81d0a03a76", "request_id": "214216f0cdb2", "method": "POST", "route": "/ask", "status": 200, "ms": 1724.1}
+```
+
+**Trace lỗi:** `trace_id` `31fc441a43422503acdad942a4eac9b7`, 848.0 ms, HTTP 503. Span `agent.run` và `chat mock-llm-small` có status lỗi và event `exception`: `type=utils.mock_llm.LLMError`, `message=Upstream LLM error: 503 Service Unavailable (mock)`. Log cùng `trace_id`:
+
+```json
+{"ts": "2026-11-25T09:46:33.340385+00:00", "level": "INFO", "service": "observable-agent", "instance": "12d476d6335c", "event": "llm_error", "trace_id": "31fc441a43422503acdad942a4eac9b7", "span_id": "ae6f7ede78d7c77e", "request_id": "070168f1c810", "error": "Upstream LLM error: 503 Service Unavailable (mock)"}
+{"ts": "2026-11-25T09:46:33.341069+00:00", "level": "INFO", "service": "observable-agent", "instance": "12d476d6335c", "event": "http_request", "trace_id": "31fc441a43422503acdad942a4eac9b7", "span_id": "ae6f7ede78d7c77e", "request_id": "070168f1c810", "method": "POST", "route": "/ask", "status": 503, "ms": 847.1}
+```
+
+Ghi chú: Jaeger 2.23 không còn API cũ `/api/traces` (trả 404), phải dùng `/api/v3/traces` (định dạng OTLP; lỗi nằm ở `status.code` chứ không phải tag `error=true`).
 
 ---
 

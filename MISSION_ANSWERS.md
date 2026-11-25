@@ -254,14 +254,21 @@ Image slim không có `ps`/`curl`, nên kiểm tra bên trong container bằng `
 
 ### Exercise 3.1 / 3.2: Deploy lên Railway hoặc Render
 
-> **Chưa deploy.** Theo CHECKPOINTS, CP6 deploy **agent Part 6** (`06-lab-complete/`), không deploy app mẫu `03-cloud-deployment/`. Nền tảng chính: **Railway**.
-> 1. ✅ Part 6 đạt `PASS 12/12`; `railway.toml` (builder `DOCKERFILE`, `healthcheckPath = "/health"`) đã sẵn sàng.
-> 2. ⏳ Còn chờ: đăng nhập tài khoản Railway; set `AGENT_API_KEY` bằng biến môi trường trên nền tảng; thêm Redis.
->
-> Khi deploy xong sẽ điền vào đây: URL public, kết quả 4 lệnh tự kiểm của CP6 (`/health` 200, `/ready` 200, `/ask` không key 401, `/ask` có key 200), ảnh trong `screenshots/` và `DEPLOYMENT.md`.
+Nền tảng chính: **Render** (Exercise 3.2). Deploy chính agent Part 6 (`06-lab-complete/`, runtime Docker, Root Directory `06-lab-complete`), không deploy app mẫu `03-cloud-deployment/`. Chi tiết: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
-- URL: _(chưa có)_
-- Screenshot: _(chưa có)_
+- URL: https://k5-l3a-day14-nguyenvanhuy-2a202603432.onrender.com
+- Screenshot: [`screenshots/running.png`](screenshots/running.png) (`GET /health` trên URL public); `screenshots/dashboard.png`, `screenshots/test.png` do người làm bài chụp.
+
+Kết quả 4 lệnh tự kiểm của CP6 trên URL public:
+```
+GET  /health              → 200 {"status":"ok","version":"1.0.0",...}
+GET  /ready               → 200 {"ready":true}
+POST /ask (không key)     → 401 {"detail":"Missing or invalid API key. Include header: X-API-Key: <key>"}
+POST /ask (có key)        → (người làm bài tự chạy với key của mình)
+```
+`check_production_ready.py --public-url https://k5-l3a-day14-nguyenvanhuy-2a202603432.onrender.com` → `✅ Public URL: GET .../health → 200`, `Result: 12/12 tiêu chí đạt · 44/44 checks passed`.
+
+**Sự cố khi deploy:** lần deploy đầu tiên trên Render build từ commit `83e677f` — lúc đó code Part 6 chưa được push nên Render chạy **bản khung TODO**: `/health` 404, `/ready` 404, `/ask` không key 200. Sau khi push commit `4ae1a83`, Render tự build lại và 3 lệnh không cần key đều đúng. Bài học: platform build từ **git**, không từ máy mình — phải push trước rồi kiểm tra commit đang chạy trên dashboard.
 
 Đã kiểm tra trên máy với app mẫu `03-cloud-deployment/railway/`: chạy đúng `startCommand` của `railway.toml` với `PORT` khác mặc định (`uvicorn app:app --host 0.0.0.0 --port $PORT`, `PORT=8123`) → `/health` 200, `/ask` 200. Như vậy app đọc port do platform cấp và bind `0.0.0.0`.
 
@@ -642,4 +649,7 @@ Chi tiết số liệu và phân tích: [`BENCHMARK_REPORT.md`](BENCHMARK_REPORT
 - **Part 1:** các thử nghiệm container (bind localhost, `.env`, graceful shutdown SIGTERM/SIGKILL) chạy trên code repo hoặc bản copy ngoài repo; code mẫu trong `01-localhost-vs-production/` không bị sửa.
 - **Part 3:** phần so sánh `railway.toml` / `render.yaml` và Exercise 3.3 dựa trên đọc file; riêng `startCommand` của Railway đã chạy thử trên máy. Chưa deploy (cần Part 6 và tài khoản cloud).
 - **Part 4 bổ sung:** token hết hạn/giả được tạo bằng PyJWT; test 402/503/reset ngày gọi trực tiếp class `CostGuard` với budget nhỏ, không sửa code repo.
-- **Cần người làm kiểm tra lại:** các câu trả lời lý thuyết (đặc biệt so sánh Part 3 và pipeline Cloud Run) trước khi nộp; đảm bảo hiểu từng đoạn code trong `budget_guard.py`.
+- **Part 6:** Claude Code viết code các TODO trong `06-lab-complete/` (thiết kế dựa trên lỗi đo được ở Part 1–5), chạy `check_production_ready.py` (Windows và container Linux) tới `PASS 12/12`, giả lập môi trường Railway và tìm/sửa lỗi fail-fast với `--workers 2`. Script chấm không bị sửa.
+- **Part 3 (deploy):** người làm bài tự tạo service trên Render; Claude Code commit + push code, chạy các lệnh tự kiểm và `--public-url`, viết `DEPLOYMENT.md`. Lệnh `/ask` có key do người làm bài tự chạy (key không đi qua AI).
+- **Part 7:** Claude Code chạy load test, eval, sửa `KNOWLEDGE_BASE`, stack Docker, Locust, thí nghiệm alert bằng script đo thời gian qua API Prometheus, lấy trace qua API Jaeger, chụp ảnh UI bằng Chromium headless, viết `BENCHMARK_REPORT.md`; sửa 1 dòng `production/Dockerfile` để stack chạy được. Mọi số trong báo cáo lấy từ file JSON/CSV đã nộp hoặc truy vấn Prometheus/Jaeger lúc chạy.
+- **Cần người làm kiểm tra lại:** các câu trả lời lý thuyết (đặc biệt so sánh Part 3, pipeline Cloud Run, nhận xét trong `BENCHMARK_REPORT.md`) trước khi nộp; đảm bảo hiểu từng đoạn code trong `06-lab-complete/app/` và `budget_guard.py` (Lab Coach có thể hỏi bất kỳ đoạn nào — RULES.md mục 1).
