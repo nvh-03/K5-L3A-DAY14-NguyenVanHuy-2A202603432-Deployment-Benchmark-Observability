@@ -257,14 +257,14 @@ Image slim không có `ps`/`curl`, nên kiểm tra bên trong container bằng `
 Nền tảng chính: **Render** (Exercise 3.2). Deploy chính agent Part 6 (`06-lab-complete/`, runtime Docker, Root Directory `06-lab-complete`), không deploy app mẫu `03-cloud-deployment/`. Chi tiết: [`DEPLOYMENT.md`](DEPLOYMENT.md).
 
 - URL: https://k5-l3a-day14-nguyenvanhuy-2a202603432.onrender.com
-- Screenshot: [`screenshots/running.png`](screenshots/running.png) (`GET /health` trên URL public); `screenshots/dashboard.png`, `screenshots/test.png` do người làm bài chụp.
+- Screenshot: [`screenshots/dashboard.png`](screenshots/dashboard.png) (Render: Deploy succeeded / Live), [`screenshots/running.png`](screenshots/running.png) (`GET /health`), [`screenshots/test.png`](screenshots/test.png) (4 lệnh tự kiểm: 200 / 200 / 401 / 200).
 
 Kết quả 4 lệnh tự kiểm của CP6 trên URL public:
 ```
 GET  /health              → 200 {"status":"ok","version":"1.0.0","environment":"production",...}
 GET  /ready               → 200 {"ready":true}
 POST /ask (không key)     → 401 {"detail":"Missing or invalid API key. Include header: X-API-Key: <key>"}
-POST /ask (có key)        → (người làm bài tự chạy với key của mình)
+POST /ask (có key)        → 200 (screenshots/test.png)
 POST /ask (key sai)       → 401
 GET  /docs                → 404 (ẩn khi ENVIRONMENT=production)
 ```

@@ -38,7 +38,7 @@ Kết quả đã chạy (2026-11-25):
 | `GET /health` | 200 | **200** `{"status":"ok","version":"1.0.0","environment":"production",...}` |
 | `GET /ready` | 200 | **200** `{"ready":true}` (Redis kết nối được) |
 | `POST /ask` không có key | 401 | **401** `{"detail":"Missing or invalid API key. Include header: X-API-Key: <key>"}` |
-| `POST /ask` có key | 200 | _người làm bài tự chạy với key của mình — điền kết quả_ |
+| `POST /ask` có key | 200 | **200** (ảnh `screenshots/test.png`) |
 | `POST /ask` key sai | 401 | **401** |
 | `GET /docs` | 404 (ẩn khi production) | **404** |
 
@@ -87,6 +87,8 @@ python check_production_ready.py --public-url https://k5-l3a-day14-nguyenvanhuy-
 Health Check Path trên Render: `/health`.
 
 ## Screenshots
-- [Deployment dashboard](screenshots/dashboard.png) — _trang Deploy của Render (Deploy succeeded / Live, commit `7d2698c`)_
+- [Deployment dashboard](screenshots/dashboard.png) — trang Deploy của Render: Deploy succeeded / Live, commit `7d2698c`, log khởi động
 - [Service running](screenshots/running.png) — `GET /health` trên URL public (`"environment":"production"`)
-- [Test results](screenshots/test.png) — _terminal chạy 4 lệnh tự kiểm ở trên (che key)_
+- [Test results](screenshots/test.png) — Git Bash chạy 4 lệnh tự kiểm: `200 / 200 / 401 / 200` (key nhập bằng `read -s`, không hiện trên màn hình)
+
+**Ghi chú khi test:** lần đầu lệnh có key trả `HTTP 400` với body rỗng (không phải lỗi của agent — lỗi của agent luôn có JSON `detail`). Nguyên nhân: trong Git Bash, nhấn Ctrl+V ở lời nhắc `read -s` chèn ký tự điều khiển `^V` (0x16) thay vì dán key; proxy của Render từ chối header chứa ký tự điều khiển. Đã tái hiện bằng key giả `$'\x16'` → 400 rỗng. Dán bằng Shift+Insert thì trả 200.
