@@ -1,0 +1,27 @@
+{
+  "target": "http://p7-agent:8000",
+  "concurrency": 100,
+  "total_requests": 300,
+  "duration_s": 7.27,
+  "rps": 41.26,
+  "error_rate": 0.01,
+  "status_codes": {
+    "200": 297,
+    "503": 3
+  },
+  "latency_ms": {
+    "min": 233.2,
+    "avg": 1707.3,
+    "p50": 1070.6,
+    "p90": 4355.5,
+    "p95": 5080.5,
+    "p99": 5709.0,
+    "max": 6525.2
+  },
+  "total_cost_usd": 0.010132,
+  "slo": {
+    "p95_ms": 500,
+    "error_rate": 0.02,
+    "passed": false
+  }
+}
