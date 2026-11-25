@@ -261,14 +261,18 @@ Nền tảng chính: **Render** (Exercise 3.2). Deploy chính agent Part 6 (`06-
 
 Kết quả 4 lệnh tự kiểm của CP6 trên URL public:
 ```
-GET  /health              → 200 {"status":"ok","version":"1.0.0",...}
+GET  /health              → 200 {"status":"ok","version":"1.0.0","environment":"production",...}
 GET  /ready               → 200 {"ready":true}
 POST /ask (không key)     → 401 {"detail":"Missing or invalid API key. Include header: X-API-Key: <key>"}
 POST /ask (có key)        → (người làm bài tự chạy với key của mình)
+POST /ask (key sai)       → 401
+GET  /docs                → 404 (ẩn khi ENVIRONMENT=production)
 ```
 `check_production_ready.py --public-url https://k5-l3a-day14-nguyenvanhuy-2a202603432.onrender.com` → `✅ Public URL: GET .../health → 200`, `Result: 12/12 tiêu chí đạt · 44/44 checks passed`.
 
 **Sự cố khi deploy:** lần deploy đầu tiên trên Render build từ commit `83e677f` — lúc đó code Part 6 chưa được push nên Render chạy **bản khung TODO**: `/health` 404, `/ready` 404, `/ask` không key 200. Sau khi push commit `4ae1a83`, Render tự build lại và 3 lệnh không cần key đều đúng. Bài học: platform build từ **git**, không từ máy mình — phải push trước rồi kiểm tra commit đang chạy trên dashboard.
+
+**Sự cố thứ hai — gõ sai tên biến môi trường:** `AGEN_API_KEY` và `ENVIROMENT` thay vì `AGENT_API_KEY` và `ENVIRONMENT`. App không báo lỗi mà âm thầm dùng giá trị mặc định: `/health` báo `"environment":"development"`, `/docs` mở công khai, `/ask` trả 401 cho cả key đúng. Phát hiện nhờ `/health` trả về `environment`. Sau khi sửa tên (và tạo key mới vì key cũ đã hiện trong ảnh chụp màn hình), log khởi động trên Render báo `"environment": "production", "redis_reachable": true` và Uvicorn nghe cổng `10000` do Render cấp. Bài học: endpoint health nên phơi ra cấu hình không bí mật (environment, version) để kiểm tra được từ bên ngoài; cấu hình production nên fail-fast — chính cơ chế "thiếu `AGENT_API_KEY` khi production thì dừng" đã chứng minh key được nạp đúng (deploy khởi động thành công).
 
 Đã kiểm tra trên máy với app mẫu `03-cloud-deployment/railway/`: chạy đúng `startCommand` của `railway.toml` với `PORT` khác mặc định (`uvicorn app:app --host 0.0.0.0 --port $PORT`, `PORT=8123`) → `/health` 200, `/ask` 200. Như vậy app đọc port do platform cấp và bind `0.0.0.0`.
 
